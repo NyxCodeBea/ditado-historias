@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Testes — Ditado de Histórias</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; background: #f5eee3; color: #2d2620; }
+    h1 { font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    li { margin: 4px 0; } .ok { color: #3d7563; } .falhou { color: #b3261e; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Testes da lógica de texto</h1>
+  <p id="resumo">Executando…</p>
+  <ul id="lista"></ul>
+  <script type="module">
+    import { executarTestes } from './testes.js';
+    const r = executarTestes();
+    const ul = document.getElementById('lista');
+    for (const x of r) {
+      const li = document.createElement('li');
+      li.className = x.ok ? 'ok' : 'falhou';
+      li.textContent = (x.ok ? '✔ ' : '✘ ') + x.nome + (x.ok ? '' : ' — ' + x.erro);
+      ul.append(li);
+    }
+    const falhas = r.filter((x) => !x.ok).length;
+    document.getElementById('resumo').textContent = `${r.length - falhas} de ${r.length} testes passaram.`;
+  </script>
+</body>
+</html>

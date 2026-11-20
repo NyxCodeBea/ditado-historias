@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Ditado de Histórias</title>
+  <meta name="description" content="Escreva suas histórias ditando, com o dicionário do seu mundo.">
+  <meta name="theme-color" content="#f5eee3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1916" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Ditado">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===================== HISTÓRIAS ===================== -->
+    <section id="tela-historias" class="tela" aria-labelledby="titulo-historias">
+      <header class="barra-topo">
+        <h1 id="titulo-historias" class="titulo-tela uma-linha">Minhas histórias</h1>
+      </header>
+      <div class="conteudo-rolavel">
+        <ul id="lista-historias" class="lista-cartoes"></ul>
+        <div id="historias-vazio" class="vazio" hidden>
+          <p class="vazio-titulo uma-linha">Nenhuma história ainda</p>
+          <p>Toque em “Nova história” e comece a ditar.</p>
+        </div>
+      </div>
+      <button id="nova-historia" class="fab" type="button"></button>
+    </section>
+
+    <!-- ===================== EDITOR ===================== -->
+    <section id="tela-editor" class="tela tela-editor" aria-label="Editor">
+      <header class="barra-topo">
+        <button id="ed-voltar" class="botao-icone" type="button" aria-label="Voltar para as histórias"></button>
+        <button id="ed-cabecalho" class="cabecalho-editor" type="button" aria-label="Renomear história">
+          <span id="ed-titulo" class="titulo-editor uma-linha"></span>
+          <span class="meta uma-linha"><span id="ed-palavras">0 palavras</span> · <span id="ed-salvo">Salvo</span></span>
+        </button>
+        <button id="ed-copiar" class="botao-copiar" type="button" aria-label="Copiar texto (ou o trecho selecionado)"></button>
+        <button id="ed-menu" class="botao-icone" type="button" aria-label="Mais opções"></button>
+      </header>
+
+      <div class="area-texto">
+        <textarea id="ed-texto" class="texto-historia" spellcheck="true" autocapitalize="sentences"
+          placeholder="Toque no microfone e comece a contar sua história…" aria-label="Texto da história"></textarea>
+      </div>
+
+      <div class="barra-nomes" id="ed-barra-nomes">
+        <button id="ed-busca-nomes" class="chip chip-icone" type="button" aria-label="Buscar nome"></button>
+        <input id="ed-filtro-nomes" class="filtro-nomes" type="search" placeholder="Buscar nome…" hidden enterkeyhint="search">
+        <div id="ed-nomes" class="rolagem-h" role="toolbar" aria-label="Nomes do dicionário"></div>
+      </div>
+
+      <div id="ed-pontuacao" class="barra-pontuacao rolagem-h" role="toolbar" aria-label="Pontuação">
+        <button class="tecla" type="button" data-peca="," aria-label="Vírgula">,</button>
+        <button class="tecla" type="button" data-peca="." aria-label="Ponto">.</button>
+        <button class="tecla" type="button" data-peca="?" aria-label="Interrogação">?</button>
+        <button class="tecla" type="button" data-peca="!" aria-label="Exclamação">!</button>
+        <button class="tecla" type="button" data-peca="travessao" aria-label="Travessão">—</button>
+        <button class="tecla" type="button" data-peca="aspas" aria-label="Aspas">“ ”</button>
+        <button class="tecla" type="button" data-peca=":" aria-label="Dois pontos">:</button>
+        <button class="tecla" type="button" data-peca="…" aria-label="Reticências">…</button>
+        <button class="tecla" type="button" data-peca="paragrafo" aria-label="Novo parágrafo">¶</button>
+      </div>
+
+      <div class="controles">
+        <button id="ed-desfazer" class="botao-redondo" type="button" aria-label="Desfazer"></button>
+        <div class="mic-envolto">
+          <button id="ed-mic" class="mic" type="button" aria-label="Começar a ditar" aria-pressed="false"></button>
+          <span id="ed-status" class="status-voz uma-linha" aria-live="polite">Toque para ditar</span>
+        </div>
+        <button id="ed-linha" class="botao-redondo" type="button" aria-label="Nova linha"></button>
+      </div>
+    </section>
+
+    <!-- ===================== DICIONÁRIO ===================== -->
+    <section id="tela-dicionario" class="tela" aria-labelledby="titulo-dicionario">
+      <header class="barra-topo">
+        <h1 id="titulo-dicionario" class="titulo-tela uma-linha">Dicionário do Mundo</h1>
+        <button id="dic-menu" class="botao-icone" type="button" aria-label="Exportar ou importar"></button>
+      </header>
+      <div class="conteudo-rolavel">
+        <div class="busca-dicionario">
+          <input id="dic-busca" class="campo" type="search" placeholder="Buscar por nome, código ou variação…" enterkeyhint="search">
+        </div>
+        <div id="dic-categorias" class="filtros rolagem-h" role="tablist" aria-label="Filtrar por categoria"></div>
+        <ul id="lista-dicionario" class="lista-cartoes"></ul>
+        <div id="dicionario-vazio" class="vazio" hidden>
+          <p class="vazio-titulo uma-linha">Dicionário vazio</p>
+          <p>Cadastre personagens, lugares e termos do seu mundo. Eles viram botões no editor e podem ser chamados por código na voz.</p>
+        </div>
+      </div>
+      <button id="nova-entrada" class="fab" type="button"></button>
+    </section>
+
+    <!-- ===================== AJUSTES ===================== -->
+    <section id="tela-ajustes" class="tela" aria-labelledby="titulo-ajustes">
+      <header class="barra-topo">
+        <h1 id="titulo-ajustes" class="titulo-tela uma-linha">Configurações</h1>
+      </header>
+      <div class="conteudo-rolavel ajustes">
+
+        <h2 class="secao uma-linha">Aparência</h2>
+        <div class="cartao">
+          <div class="linha-ajuste">
+            <span class="rotulo uma-linha">Tema</span>
+            <div class="segmentos" id="aj-tema" role="radiogroup" aria-label="Tema">
+              <button type="button" data-valor="auto">Auto</button>
+              <button type="button" data-valor="claro">Claro</button>
+              <button type="button" data-valor="escuro">Escuro</button>
+            </div>
+          </div>
+          <div class="linha-ajuste coluna">
+            <label class="rotulo uma-linha" for="aj-tamanho">Tamanho do texto: <span id="aj-tamanho-valor">19</span></label>
+            <input id="aj-tamanho" type="range" min="15" max="28" step="1">
+          </div>
+        </div>
+
+        <h2 class="secao uma-linha">Ditado</h2>
+        <div class="cartao">
+          <label class="linha-ajuste interruptor">
+            <span class="textos">
+              <span class="rotulo uma-linha">Usar palavra-gatilho</span>
+              <span class="ajuda">Só troca o código quando ele vier depois da palavra-gatilho (ex.: “código H”). Ligue se palavras comuns estiverem sendo trocadas por engano.</span>
+            </span>
+            <input id="aj-gatilho-ativo" type="checkbox">
+          </label>
+          <div class="linha-ajuste coluna">
+            <label class="rotulo uma-linha" for="aj-gatilho">Palavra-gatilho</label>
+            <input id="aj-gatilho" class="campo" type="text" autocapitalize="none" placeholder="código">
+          </div>
+          <label class="linha-ajuste interruptor">
+            <span class="textos">
+              <span class="rotulo uma-linha">Pontuação falada</span>
+              <span class="ajuda">“vírgula”, “ponto”, “travessão”, “abre aspas”, “nova linha”…</span>
+            </span>
+            <input id="aj-comandos" type="checkbox">
+          </label>
+          <label class="linha-ajuste interruptor">
+            <span class="textos">
+              <span class="rotulo uma-linha">Maiúscula automática</span>
+              <span class="ajuda">No começo do texto e depois de ponto, “?”, “!” e nova linha.</span>
+            </span>
+            <input id="aj-maiuscula" type="checkbox">
+          </label>
+          <div class="linha-ajuste coluna">
+            <span class="rotulo uma-linha">Microfone</span>
+            <span id="aj-voz-status" class="ajuda"></span>
+          </div>
+        </div>
+
+        <h2 class="secao uma-linha">Cópia de segurança</h2>
+        <div class="cartao">
+          <p class="ajuda">Tudo fica guardado só neste celular. Faça um backup de vez em quando (histórias + dicionário + configurações) e guarde no Drive ou no e-mail.</p>
+          <p class="ajuda" id="aj-ultimo-backup"></p>
+          <div class="botoes-linha">
+            <button id="aj-backup" class="botao principal" type="button">Fazer backup</button>
+            <button id="aj-restaurar" class="botao secundario" type="button">Restaurar</button>
+          </div>
+        </div>
+
+        <h2 class="secao uma-linha">Comandos de voz</h2>
+        <div class="cartao">
+          <ul class="lista-comandos">
+            <li><b>vírgula</b> ,</li><li><b>ponto</b> .</li>
+            <li><b>ponto de interrogação</b> ?</li><li><b>ponto de exclamação</b> !</li>
+            <li><b>dois pontos</b> :</li><li><b>ponto e vírgula</b> ;</li>
+            <li><b>travessão</b> —</li><li><b>reticências</b> …</li>
+            <li><b>abre aspas / fecha aspas</b> “ ”</li><li><b>aspas</b> abre ou fecha</li>
+            <li><b>abre / fecha parênteses</b> ( )</li>
+            <li><b>nova linha</b> ↵</li><li><b>novo parágrafo</b> ¶</li>
+          </ul>
+        </div>
+
+        <p class="rodape">Ditado de Histórias · versão <span id="aj-versao"></span></p>
+      </div>
+    </section>
+
+    <!-- ===================== ABAS ===================== -->
+    <nav id="abas" class="abas" aria-label="Navegação">
+      <a href="#/historias" data-aba="historias" class="aba"><span class="aba-icone" data-icone="livro"></span><span class="uma-linha">Histórias</span></a>
+      <a href="#/dicionario" data-aba="dicionario" class="aba"><span class="aba-icone" data-icone="dicionario"></span><span class="uma-linha">Dicionário</span></a>
+      <a href="#/ajustes" data-aba="ajustes" class="aba"><span class="aba-icone" data-icone="ajustes"></span><span class="uma-linha">Ajustes</span></a>
+    </nav>
+  </div>
+
+  <div id="camada-janelas"></div>
+  <div id="aviso" class="aviso" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
