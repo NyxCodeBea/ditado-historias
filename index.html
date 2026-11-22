@@ -149,6 +149,30 @@
             </span>
             <input id="aj-maiuscula" type="checkbox">
           </label>
+          <label class="linha-ajuste interruptor">
+            <span class="textos">
+              <span class="rotulo uma-linha">Pontuação automática</span>
+              <span class="ajuda">Põe vírgula e ponto pelas pausas da sua fala, “?” em perguntas (quem, como, onde…) e vírgula antes de “mas”, “porém”, “então”… Os comandos falados continuam valendo e têm prioridade.</span>
+            </span>
+            <input id="aj-pont-auto" type="checkbox">
+          </label>
+          <div class="linha-ajuste coluna">
+            <label class="rotulo uma-linha" for="aj-pausa-curta">Pausa para vírgula: <span id="aj-pausa-curta-valor">0,7 s</span></label>
+            <input id="aj-pausa-curta" type="range" min="300" max="2000" step="100">
+            <label class="rotulo uma-linha" for="aj-pausa-longa">Pausa para ponto final: <span id="aj-pausa-longa-valor">1,6 s</span></label>
+            <input id="aj-pausa-longa" type="range" min="800" max="4000" step="100">
+            <span class="ajuda">Se aparecem vírgulas demais, aumente a primeira. Se faltam pontos, diminua a segunda.</span>
+            <div class="botoes-linha">
+              <button id="aj-pausa-padrao" class="botao secundario" type="button">Voltar ao padrão</button>
+            </div>
+          </div>
+          <label class="linha-ajuste interruptor">
+            <span class="textos">
+              <span class="rotulo uma-linha">Modo teclado</span>
+              <span class="ajuda">No texto digitado ou ditado pelo microfone do teclado do celular: troca os códigos do dicionário e arruma espaços, pontuação dupla e maiúsculas. A pontuação do teclado é mantida.</span>
+            </span>
+            <input id="aj-teclado" type="checkbox">
+          </label>
           <div class="linha-ajuste coluna">
             <span class="rotulo uma-linha">Microfone</span>
             <span id="aj-voz-status" class="ajuda"></span>

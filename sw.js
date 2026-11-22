@@ -4,7 +4,7 @@
 // Ao publicar uma versão nova, aumente o número em VERSAO.
 // ============================================================
 
-const VERSAO = '1.0.0';
+const VERSAO = '1.1.0';
 const CACHE = `ditado-${VERSAO}`;
 const ARQUIVOS = [
   './',
@@ -21,7 +21,6 @@ const ARQUIVOS = [
   './js/dicionario.js',
   './js/ajustes.js',
   './js/exportar.js',
-  './js/revisao.js',
   './icons/icone.svg',
   './icons/icone-192.png',
   './icons/icone-512.png',
@@ -30,7 +29,12 @@ const ARQUIVOS = [
 ];
 
 self.addEventListener('install', (ev) => {
-  ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
+  // cache: 'reload' busca da internet (não do cache do navegador), para a versão nova vir completa.
+  ev.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(ARQUIVOS.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (ev) => {

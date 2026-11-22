@@ -13,13 +13,12 @@ css/estilo.css        visual claro/escuro
 js/app.js             início e navegação
 js/db.js              armazenamento local
 js/voz.js             reconhecimento de voz pt-BR
-js/texto.js           códigos, pontuação falada, maiúsculas e espaçamento
+js/texto.js           códigos, pontuação falada e automática (pausas), modo teclado, maiúsculas e espaçamento
 js/editor.js          tela do editor
 js/historias.js       lista de histórias
 js/dicionario.js      Dicionário do Mundo
 js/ajustes.js         configurações e backup
 js/exportar.js        .txt e .docx
-js/revisao.js         Fase 2 (revisão por IA), ainda desligada
 icons/                ícones
 testes/               testes da lógica de texto (node testes/testes.js ou abrir testes/testes.html)
 ```

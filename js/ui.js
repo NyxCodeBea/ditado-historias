@@ -23,7 +23,6 @@ const caminhos = {
   compartilhar: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4"/>',
   enter: '<path d="M20 5v6a3 3 0 0 1-3 3H5"/><path d="m9 10-4 4 4 4"/>',
   copiar: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
-  revisar: '<path d="M4 6h10M4 11h7M4 16h5"/><path d="m13 17 3 3 5-6"/>',
 };
 
 export function icone(nome, tamanho = 24) {

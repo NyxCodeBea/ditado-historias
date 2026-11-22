@@ -3,12 +3,14 @@
 // barra de nomes, pontuação, desfazer e salvamento automático.
 // ============================================================
 
-import { analisarTrecho, montarInsercao, previaParcial, contarPalavras, normalizar, textoParaCopiar } from './texto.js';
+import {
+  analisarTrecho, montarInsercao, previaParcial, contarPalavras, normalizar, textoParaCopiar,
+  pontuarAuto, ajustarTeclado,
+} from './texto.js';
 import { Ditado } from './voz.js';
 import * as db from './db.js';
 import { el, icone, aviso, menu, pedirTexto, confirmar, formatarNumero } from './ui.js';
 import { exportarTxt, exportarDocx, podeCompartilharArquivos } from './exportar.js';
-import { REVISAO_DISPONIVEL } from './revisao.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -27,6 +29,7 @@ const PECAS_BOTOES = {
 };
 
 const LIMITE_DESFAZER = 200;
+const ESPERA_TECLADO = 700; // ms sem digitar antes de ajustar o texto do teclado
 
 export class Editor {
   constructor(ctx) {
@@ -43,10 +46,14 @@ export class Editor {
     this.estadoAnterior = null;
     this.ultimaDigitacao = 0;
     this.bloqueioTela = null;
+    this.temposParcial = null; // { inicio, fim } do texto provisório
+    this.ultimoFalado = null;  // { fim, pos, valor } do último trecho ditado pelo app
+    this.sujo = null;          // trecho vindo do teclado ainda não ajustado { ini, fim }
+    this.compondo = false;     // teclado no meio de uma palavra (composição)
 
     this.voz = new Ditado({
-      aoParcial: (t) => this.aoParcial(t),
-      aoFinal: (t) => this.aoFinal(t),
+      aoParcial: (t, tempos) => this.aoParcial(t, tempos),
+      aoFinal: (t, tempos) => this.aoFinal(t, tempos),
       aoFimSessao: () => this.aoFimSessao(),
       aoEstado: (e) => this.aoEstadoVoz(e),
       aoErro: (m) => aviso(m, 5000),
@@ -81,8 +88,24 @@ export class Editor {
     // Tocar no texto enquanto há texto provisório: confirma o provisório.
     ta.addEventListener('pointerdown', () => { if (this.regiao) this.confirmarParcial(); });
 
+    // Modo teclado: guarda onde o teclado mexeu no texto.
+    ta.addEventListener('compositionstart', () => { this.compondo = true; });
+    ta.addEventListener('compositionend', () => { this.compondo = false; this.agendarTeclado(); });
+    ta.addEventListener('beforeinput', (e) => {
+      if (this.regiao) return;
+      const tipo = e.inputType || '';
+      const p = ta.selectionStart;
+      if (tipo.startsWith('history')) { this.sujo = null; return; }
+      if (tipo.startsWith('delete')) {
+        if (this.sujo) this.sujo.ini = Math.min(this.sujo.ini, Math.max(0, p - 1));
+        return;
+      }
+      if (!this.sujo) this.sujo = { ini: p, fim: p };
+      else this.sujo.ini = Math.min(this.sujo.ini, p);
+    });
+
     // Edição à mão.
-    ta.addEventListener('input', () => {
+    ta.addEventListener('input', (e) => {
       if (this.regiao) {
         // A pessoa digitou com texto provisório na tela: ele fica como está.
         this.regiao = null;
@@ -94,8 +117,20 @@ export class Editor {
       this.ultimaDigitacao = agora;
       this.cursor = ta.selectionStart;
       this.estadoAnterior = { valor: ta.value, cursor: this.cursor };
+      const tipo = e.inputType || '';
+      if (!this.sujo && tipo.startsWith('insert')) {
+        // Navegadores sem "beforeinput": estima pelo tamanho do que entrou.
+        const p = Math.max(0, this.cursor - ((e.data && e.data.length) || 1));
+        this.sujo = { ini: p, fim: p };
+      }
+      if (this.sujo) {
+        this.sujo.ini = Math.min(this.sujo.ini, ta.value.length);
+        this.sujo.fim = Math.min(Math.max(this.sujo.fim, this.cursor), ta.value.length);
+        if (!e.isComposing) this.agendarTeclado();
+      }
       this.aoMudarTexto();
     });
+    ta.addEventListener('blur', () => this.processarTeclado(true));
 
     // Botões que não devem tirar o foco do texto (para não fechar o teclado).
     const manterFoco = (b) => b.addEventListener('pointerdown', (e) => {
@@ -184,6 +219,10 @@ export class Editor {
     this.pilha = [];
     this.estadoAnterior = { valor: this.ta.value, cursor: this.cursor };
     this.ultimaDigitacao = 0;
+    this.ultimoFalado = null;
+    this.temposParcial = null;
+    this.sujo = null;
+    this.compondo = false;
     $('#ed-titulo').textContent = historia.titulo;
     $('#ed-filtro-nomes').value = '';
     $('#ed-filtro-nomes').hidden = true;
@@ -200,6 +239,7 @@ export class Editor {
     if (!this.historia) return;
     if (this.voz.ligado) this.voz.parar();
     if (this.regiao) this.aoFimSessao();
+    this.processarTeclado(true);
     await this.salvarAgora();
     this.historia = null;
   }
@@ -215,6 +255,9 @@ export class Editor {
         return;
       }
       if (document.activeElement === this.ta) this.cursor = this.ta.selectionStart;
+      this.processarTeclado(true);
+      // A pausa só conta entre trechos da mesma escuta.
+      this.ultimoFalado = null;
       this.voz.iniciar();
     }
   }
@@ -254,7 +297,8 @@ export class Editor {
     return Math.max(0, Math.min(this.cursor, this.ta.value.length));
   }
 
-  aoParcial(texto) {
+  aoParcial(texto, tempos) {
+    this.temposParcial = tempos || null;
     const t = (texto || '').trim();
     if (!t) {
       if (this.regiao) { this.removerParcial(); this.posicionar(this.cursor); }
@@ -283,11 +327,20 @@ export class Editor {
     this.parcial = '';
   }
 
-  aoFinal(texto) {
+  aoFinal(texto, tempos) {
     let pos;
     if (this.regiao) { pos = this.regiao.inicio; this.removerParcial(); }
     else pos = this.posicaoCursor();
-    this.inserirFalado(texto, pos);
+    this.temposParcial = null;
+    this.inserirFalado(texto, pos, tempos);
+  }
+
+  /** Tempos do texto provisório atual (para pontuar pela pausa). */
+  temposDoParcial() {
+    const t = this.temposParcial;
+    this.temposParcial = null;
+    if (!t || t.inicio == null) return null;
+    return { inicio: t.inicio, fim: t.fim ?? Date.now() };
   }
 
   /** O navegador encerrou a escuta: o que estava provisório vira definitivo. */
@@ -295,8 +348,9 @@ export class Editor {
     if (!this.regiao) return;
     const t = this.parcial;
     const pos = this.regiao.inicio;
+    const tempos = this.temposDoParcial();
     this.removerParcial();
-    if (t) this.inserirFalado(t, pos);
+    if (t) this.inserirFalado(t, pos, tempos);
   }
 
   /** Confirma o texto provisório agora (antes de inserir um nome, por exemplo). */
@@ -304,23 +358,38 @@ export class Editor {
     if (!this.regiao) return false;
     const t = this.parcial;
     const pos = this.regiao.inicio;
+    const tempos = this.temposDoParcial();
     this.removerParcial();
-    if (t) this.inserirFalado(t, pos);
+    if (t) this.inserirFalado(t, pos, tempos);
     // O reconhecedor ainda mandaria esse mesmo trecho: descarta e volta a ouvir.
     this.voz.descartarEReiniciar();
     return true;
   }
 
-  inserirFalado(texto, pos) {
-    const pecas = analisarTrecho(texto, this.ctx.indice, this.ctx.config);
+  inserirFalado(texto, pos, tempos = null) {
+    const cfg = this.ctx.config;
+    let pecas = analisarTrecho(texto, this.ctx.indice, cfg);
+    if (cfg.pontuacaoAuto !== false) {
+      // Só mede a pausa se este trecho continua exatamente onde o anterior terminou
+      // e nada foi digitado ou inserido no meio (senão a pontuação já foi decidida).
+      const u = this.ultimoFalado;
+      const continua = u && tempos && u.pos === pos && u.valor === this.ta.value;
+      pecas = pontuarAuto(this.ta.value.slice(0, pos), pecas, {
+        pausa: continua ? Math.max(0, tempos.inicio - u.fim) : null,
+        curta: cfg.pausaCurta,
+        longa: cfg.pausaLonga,
+      });
+    }
     this.inserirPecas(pecas, pos);
+    this.ultimoFalado = tempos ? { fim: tempos.fim, pos: this.cursor, valor: this.ta.value } : null;
   }
 
   inserirPecas(pecas, pos) {
     if (!pecas || !pecas.length) return;
     const v = this.ta.value;
     this.empilhar({ valor: v, cursor: pos });
-    const r = montarInsercao(v.slice(0, pos), pecas, v.slice(pos), this.ctx.config);
+    const nomes = this.ctx.dicionario.map((e) => e.texto);
+    const r = montarInsercao(v.slice(0, pos), pecas, v.slice(pos), this.ctx.config, nomes);
     this.definirTexto(r.texto, r.cursor);
     for (const p of pecas) if (p.tipo === 'nome' && p.id) this.ctx.registrarUso(p.id);
     this.aoMudarTexto();
@@ -387,10 +456,56 @@ export class Editor {
     else if (topo + alturaLinha > ta.scrollTop + ta.clientHeight) ta.scrollTop = topo - ta.clientHeight + alturaLinha * 2;
   }
 
+  // ---------- Modo teclado ----------
+
+  agendarTeclado() {
+    if (this.ctx.config.modoTeclado === false) { this.sujo = null; return; }
+    clearTimeout(this.tTeclado);
+    this.tTeclado = setTimeout(() => this.processarTeclado(false), ESPERA_TECLADO);
+  }
+
+  /**
+   * Ajusta o que entrou pelo teclado (códigos, espaços, maiúsculas).
+   * Normal: só até o último espaço (a palavra em andamento fica para depois).
+   * final=true: tudo (ao sair do texto, copiar, exportar, ligar o microfone).
+   */
+  processarTeclado(final = false) {
+    clearTimeout(this.tTeclado);
+    const s = this.sujo;
+    if (!s || this.regiao) return;
+    if (this.ctx.config.modoTeclado === false) { this.sujo = null; return; }
+    if (this.compondo && !final) return;
+    const ta = this.ta;
+    const focado = document.activeElement === ta;
+    if (focado && ta.selectionStart !== ta.selectionEnd && !final) return; // selecionando
+    const v = ta.value;
+    const fim = Math.min(s.fim, v.length);
+    let lim = fim;
+    if (!final) {
+      const trecho = v.slice(s.ini, fim);
+      const k = Math.max(trecho.lastIndexOf(' '), trecho.lastIndexOf('\n'), trecho.lastIndexOf('\t'));
+      if (k < 0) return;
+      lim = s.ini + k + 1;
+    }
+    if (lim <= s.ini) { if (final) this.sujo = null; return; }
+    const nomes = this.ctx.dicionario.map((e) => e.texto);
+    const r = ajustarTeclado(v, s.ini, lim, this.ctx.indice, this.ctx.config, nomes);
+    const delta = r ? r.delta : 0;
+    this.sujo = fim > lim ? { ini: lim + delta, fim: fim + delta } : null;
+    if (!r) return;
+    const cursorAntes = focado ? ta.selectionStart : this.cursor;
+    const cursor = cursorAntes >= lim ? cursorAntes + delta : Math.min(cursorAntes, lim + delta);
+    this.empilhar({ valor: v, cursor: cursorAntes });
+    this.definirTexto(r.texto, cursor);
+    for (const id of r.ids) this.ctx.registrarUso(id);
+    this.aoMudarTexto();
+  }
+
   // ---------- Copiar ----------
 
   copiar(selecao) {
     const tem = selecao && selecao.fim > selecao.inicio;
+    if (!tem) this.processarTeclado(true);
     const { texto } = tem
       ? textoParaCopiar(this.ta.value, selecao.inicio, selecao.fim)
       : textoParaCopiar(this.textoSemParcial());
@@ -542,6 +657,7 @@ export class Editor {
   async abrirMenu() {
     if (!this.historia) return;
     if (this.regiao) this.confirmarParcial();
+    this.processarTeclado(true);
     await this.salvarAgora();
     const compartilhar = podeCompartilharArquivos();
     const escolha = await menu(this.historia.titulo, [
@@ -550,8 +666,6 @@ export class Editor {
       { texto: 'Baixar .txt', icone: 'baixar', valor: 'txt' },
       { texto: 'Compartilhar .docx', icone: 'compartilhar', valor: 'docx-c', oculta: !compartilhar },
       { texto: 'Compartilhar .txt', icone: 'compartilhar', valor: 'txt-c', oculta: !compartilhar },
-      // FASE 2: aparece quando a revisão por IA estiver pronta.
-      { texto: 'Revisar gramática', icone: 'revisar', valor: 'revisar', oculta: !REVISAO_DISPONIVEL },
       { texto: 'Excluir história', icone: 'lixeira', valor: 'excluir', perigo: true },
     ]);
     const h = this.historia;

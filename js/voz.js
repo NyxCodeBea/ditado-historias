@@ -21,8 +21,10 @@ const MENSAGENS_ERRO = {
 export class Ditado {
   /**
    * callbacks:
-   *  aoParcial(texto)  — texto provisório (enquanto fala)
-   *  aoFinal(texto)    — trecho confirmado
+   *  aoParcial(texto, tempos) — texto provisório (enquanto fala)
+   *  aoFinal(texto, tempos)   — trecho confirmado
+   *  tempos = { inicio, fim }: quando a fala do trecho começou e quando
+   *  o texto parou de mudar (usado para medir as pausas).
    *  aoFimSessao()     — o navegador encerrou uma sessão de escuta
    *  aoEstado(estado)  — 'ouvindo' | 'iniciando' | 'parado'
    *  aoErro(mensagem)
@@ -82,6 +84,9 @@ export class Ditado {
 
     let processados = 0;      // quantos resultados finais já foram usados
     let ultimoFinal = '';     // para corrigir repetições do Chrome Android
+    let inicioTrecho = null;  // quando chegou o primeiro resultado do trecho atual
+    let ultimaMudanca = null; // quando o texto provisório mudou pela última vez
+    let ultimoParcial = '';
 
     // No Android, o Chrome às vezes repete o trecho anterior no início do novo.
     const semRepeticao = (t) => {
@@ -99,6 +104,8 @@ export class Ditado {
 
     rec.onresult = (ev) => {
       if (rec._ignorar || this.rec !== rec) return;
+      const agora = Date.now();
+      if (inicioTrecho === null) inicioTrecho = agora;
       let parcial = '';
       let viuParcial = false;
       for (let i = processados; i < ev.results.length; i++) {
@@ -108,13 +115,27 @@ export class Ditado {
           processados = i + 1;
           const novo = semRepeticao(t);
           ultimoFinal = t;
-          if (novo.trim()) this.cb.aoFinal?.(novo);
+          // Sem resultados provisórios antes, estima o começo pela quantidade de palavras.
+          const estimado = agora - 350 * (novo.trim().split(/\s+/).length || 1);
+          const tempos = {
+            inicio: ultimaMudanca === null ? estimado : inicioTrecho,
+            fim: ultimaMudanca === null ? agora : ultimaMudanca,
+          };
+          inicioTrecho = null;
+          ultimaMudanca = null;
+          ultimoParcial = '';
+          if (novo.trim()) this.cb.aoFinal?.(novo, tempos);
         } else {
           viuParcial = true;
           parcial += t;
         }
       }
-      this.cb.aoParcial?.(semRepeticao(parcial));
+      const p = semRepeticao(parcial);
+      if (p.trim()) {
+        if (inicioTrecho === null) inicioTrecho = agora;
+        if (p !== ultimoParcial) { ultimaMudanca = agora; ultimoParcial = p; }
+      }
+      this.cb.aoParcial?.(p, { inicio: inicioTrecho, fim: ultimaMudanca });
     };
 
     rec.onerror = (ev) => {

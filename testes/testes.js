@@ -7,9 +7,9 @@
 import {
   analisarTrecho, construirIndice, montarInsercao, contarPalavras,
   gerarVariacoesAuto, normalizar, previaParcial, textoParaCopiar,
+  pontuarAuto, frasePergunta, juntarPontuacao, ajustarTeclado,
 } from '../js/texto.js';
 import { criarZip, gerarDocx } from '../js/exportar.js';
-import { aplicarSugestoes } from '../js/revisao.js';
 
 const DICIONARIO = [
   { id: '1', codigo: 'H', variacoes: ['agá', 'a'], texto: 'Hán Lì 韩立', categoria: 'personagem' },
@@ -19,14 +19,16 @@ const DICIONARIO = [
   { id: '5', codigo: '2M', variacoes: [], texto: 'qì', categoria: 'termo' },
 ];
 
-const SEM_GATILHO = { gatilhoAtivo: false, palavraGatilho: 'código', comandosFalados: true, maiusculaAuto: true };
+const SEM_GATILHO = { gatilhoAtivo: false, palavraGatilho: 'código', comandosFalados: true, maiusculaAuto: true, pontuacaoAuto: true };
 const COM_GATILHO = { ...SEM_GATILHO, gatilhoAtivo: true };
 
-// Simula um ditado: insere o trecho na posição "pos" do texto.
+// Simula um ditado: insere o trecho na posição "pos" do texto
+// (com a pontuação automática, como no app, mas sem pausa medida).
 function ditar(texto, pos, falado, cfg = SEM_GATILHO, dic = DICIONARIO) {
   const indice = construirIndice(dic);
-  const pecas = analisarTrecho(falado, indice, cfg);
-  return montarInsercao(texto.slice(0, pos), pecas, texto.slice(pos), cfg);
+  let pecas = analisarTrecho(falado, indice, cfg);
+  if (cfg.pontuacaoAuto) pecas = pontuarAuto(texto.slice(0, pos), pecas, { pausa: null });
+  return montarInsercao(texto.slice(0, pos), pecas, texto.slice(pos), cfg, dic.map((e) => e.texto));
 }
 
 const casos = [];
@@ -163,13 +165,195 @@ teste('zip/docx gerado tem assinatura correta', () => {
   const docx = gerarDocx('Título', 'Linha 1\nLinha “2” & <3>');
   if (docx.length < 500) throw new Error('docx muito pequeno');
 });
-teste('aplicar sugestões da revisão (fase 2)', () => {
-  const texto = 'Eles foi embora .';
-  const r = aplicarSugestoes(texto, [
-    { inicio: 5, fim: 8, sugestao: 'foram' },
-    { inicio: 15, fim: 17, sugestao: '.' },
-  ]);
-  igual(r, 'Eles foram embora.');
+// ---------- Pontuação automática pelas pausas ----------
+const PAUSAS = { curta: 700, longa: 1600 };
+const NOMES = DICIONARIO.map((e) => e.texto);
+
+// Simula um trecho ditado no fim do texto depois de uma pausa (ms).
+function ditarPausa(texto, falado, pausa, cfg = SEM_GATILHO, dic = DICIONARIO) {
+  const indice = construirIndice(dic);
+  const pecas = pontuarAuto(texto, analisarTrecho(falado, indice, cfg), { ...PAUSAS, pausa });
+  return montarInsercao(texto, pecas, '', cfg, dic.map((e) => e.texto)).texto;
+}
+// Simula vários trechos seguidos com as pausas entre eles.
+function ditarSequencia(trechos, cfg = SEM_GATILHO) {
+  let t = '';
+  let pausa = null;
+  for (const x of trechos) {
+    if (typeof x === 'number') { pausa = x; continue; }
+    t = ditarPausa(t, x, pausa, cfg);
+    pausa = 0;
+  }
+  return t;
+}
+
+teste('pausa curta vira vírgula', () => {
+  igual(ditarPausa('Ele chegou', 'olhou em volta', 900), 'Ele chegou, olhou em volta');
+});
+teste('pausa longa vira ponto e maiúscula', () => {
+  igual(ditarPausa('Ele chegou', 'depois foi embora', 2000), 'Ele chegou. Depois foi embora');
+});
+teste('pausa pequena demais não pontua', () => {
+  igual(ditarPausa('Ele chegou', 'e sentou', 300), 'Ele chegou e sentou');
+});
+teste('sem pausa medida (primeiro trecho, cursor movido, texto editado) não pontua', () => {
+  igual(ditarPausa('Ele chegou', 'e sentou', null), 'Ele chegou e sentou');
+});
+teste('sequência de trechos com pausas', () => {
+  igual(ditarSequencia(['era uma vez um rapaz', 900, 'muito pobre', 2100, 'ele vivia sozinho']),
+    'Era uma vez um rapaz, muito pobre. Ele vivia sozinho');
+});
+teste('tempos de pausa ajustáveis', () => {
+  const indice = construirIndice([]);
+  const p = (pausa, o) => montarInsercao('Ele chegou',
+    pontuarAuto('Ele chegou', analisarTrecho('e sentou', indice, SEM_GATILHO), { pausa, ...o }), '', SEM_GATILHO).texto;
+  igual(p(900, { curta: 1000, longa: 2500 }), 'Ele chegou e sentou');
+  igual(p(1200, { curta: 1000, longa: 2500 }), 'Ele chegou, e sentou');
+  igual(p(1200, { curta: 400, longa: 1000 }), 'Ele chegou. E sentou');
+});
+teste('não pontua de novo se já há pontuação', () => {
+  igual(ditarPausa('Ele chegou.', 'depois saiu', 2000), 'Ele chegou. Depois saiu');
+  igual(ditarPausa('Ele chegou,', 'depois saiu', 2000), 'Ele chegou, depois saiu');
+  igual(ditarPausa('Ele disse:', 'vamos', 2000), 'Ele disse: vamos');
+});
+teste('comando falado tem prioridade sobre a pausa', () => {
+  igual(ditarPausa('Quem é você', 'ponto de exclamação', 2000), 'Quem é você!');
+  igual(ditarPausa('Ele chegou', 'vírgula depois saiu', 2000), 'Ele chegou, depois saiu');
+  igual(ditarPausa('Ele chegou', 'ponto e vírgula saiu', 900), 'Ele chegou; saiu');
+});
+teste('pausa longa antes de nova linha fecha a frase', () => {
+  igual(ditarPausa('Ele saiu', 'nova linha travessão volto logo', 2000), 'Ele saiu.\n— Volto logo');
+  igual(ditarPausa('Ele saiu', 'nova linha', 900), 'Ele saiu\n');
+});
+teste('pausa antes de nome do dicionário', () => {
+  igual(ditarPausa('Ele chegou', 'H sorriu', 2000), 'Ele chegou. Hán Lì 韩立 sorriu');
+});
+
+// ---------- Interrogação ----------
+teste('frase com palavra interrogativa termina com "?"', () => {
+  igual(ditarPausa('Quem é você', 'eu sou o guarda', 2000), 'Quem é você? Eu sou o guarda');
+  igual(ditarPausa('Onde ele está', 'ninguém sabe', 2000), 'Onde ele está? Ninguém sabe');
+  igual(ditarPausa('Será que ele volta', 'talvez', 2000), 'Será que ele volta? Talvez');
+  igual(ditarPausa('Por que você foi', 'porque quis', 2000), 'Por que você foi? Porque quis');
+});
+teste('palavras interrogativas reconhecidas', () => {
+  for (const f of ['quem veio', 'como foi', 'por que não', 'porque não veio', 'será que vem', 'onde fica',
+    'quando volta', 'qual deles', 'quanto custa', 'o que houve', 'Quantas são', 'cadê ele']) {
+    if (!frasePergunta(f)) throw new Error(f);
+  }
+  for (const f of ['ele veio', 'o rei chegou', 'que bom', 'será assim', 'porta aberta']) {
+    if (frasePergunta(f)) throw new Error(f);
+  }
+});
+teste('interrogação olha só a frase atual (e diálogo)', () => {
+  igual(ditarPausa('Ele chegou. Quem é', 'ninguém respondeu', 2000), 'Ele chegou. Quem é? Ninguém respondeu');
+  igual(ditarPausa('Quem veio? Ele chegou', 'depois', 2000), 'Quem veio? Ele chegou. Depois');
+  igual(ditarPausa('Fim.\n— Onde você estava', 'aqui', 2000), 'Fim.\n— Onde você estava? Aqui');
+});
+teste('pausa curta em pergunta continua sendo vírgula', () => {
+  igual(ditarPausa('Quem é você', 'afinal', 900), 'Quem é você, afinal');
+});
+
+// ---------- Conjunções ----------
+teste('vírgula antes de "mas", "porém", "contudo", "então", "entretanto"', () => {
+  igual(ditar('', 0, 'ele queria ir mas não podia').texto, 'Ele queria ir, mas não podia');
+  igual(ditar('', 0, 'era tarde porém ele ficou').texto, 'Era tarde, porém ele ficou');
+  igual(ditar('', 0, 'estava cansado contudo seguiu').texto, 'Estava cansado, contudo seguiu');
+  igual(ditar('', 0, 'ouviu um grito então correu').texto, 'Ouviu um grito, então correu');
+  igual(ditar('', 0, 'era forte entretanto hesitou').texto, 'Era forte, entretanto hesitou');
+});
+teste('conjunção: sem vírgula dupla, nem depois de "e", "desde", nem no começo', () => {
+  igual(ditar('', 0, 'ele queria ir vírgula mas não podia').texto, 'Ele queria ir, mas não podia');
+  igual(ditar('', 0, 'e então ele saiu').texto, 'E então ele saiu');
+  igual(ditar('', 0, 'desde então ninguém viu').texto, 'Desde então ninguém viu');
+  igual(ditar('', 0, 'mas ele voltou').texto, 'Mas ele voltou');
+  igual(ditar('Ele correu.', 11, 'então parou').texto, 'Ele correu. Então parou');
+});
+teste('conjunção no começo do trecho, emendando no texto anterior', () => {
+  igual(ditarPausa('Ele queria ir', 'mas não podia', 300), 'Ele queria ir, mas não podia');
+  igual(ditarPausa('Ele queria ir', 'mas não podia', 900), 'Ele queria ir, mas não podia');
+  igual(ditarPausa('Ele queria ir', 'mas não podia', 2000), 'Ele queria ir. Mas não podia');
+});
+teste('conjunção depois de nome do dicionário', () => {
+  igual(ditar('', 0, 'chamou H mas ninguém veio').texto, 'Chamou Hán Lì 韩立, mas ninguém veio');
+});
+teste('pontuação automática desligada não muda nada', () => {
+  const cfg = { ...SEM_GATILHO, pontuacaoAuto: false };
+  igual(ditar('', 0, 'ele queria ir mas não podia', cfg).texto, 'Ele queria ir mas não podia');
+});
+
+// ---------- Ajustes de escrita ----------
+teste('sem pontuação dupla', () => {
+  igual(juntarPontuacao(',', '.'), '.');
+  igual(juntarPontuacao('.', '.'), '.');
+  igual(juntarPontuacao('.', ','), '.');
+  igual(juntarPontuacao('.', '?'), '?');
+  igual(juntarPontuacao('?', '.'), '?');
+  igual(juntarPontuacao('?', '!'), '?!');
+  igual(ditar('Ele saiu.', 9, 'vírgula').texto, 'Ele saiu.');
+  igual(ditar('Ele saiu,', 9, 'ponto').texto, 'Ele saiu.');
+  igual(ditar('Ele saiu.', 9, 'interrogação').texto, 'Ele saiu?');
+});
+teste('inserir pontuação antes de outra no texto não duplica', () => {
+  igual(ditar('Ele saiu, e voltou', 8, 'ponto').texto, 'Ele saiu. E voltou');
+  igual(ditar('Ele saiu.', 8, 'vírgula').texto, 'Ele saiu.');
+});
+teste('nome em minúscula depois do ponto não vira maiúscula', () => {
+  igual(ditar('Ele sentiu qì fluir', 10, 'ponto').texto, 'Ele sentiu. qì fluir');
+  igual(ditarPausa('Ele parou', '2M fluía', 2000), 'Ele parou. qì fluía');
+});
+
+// ---------- Modo teclado ----------
+const IDX = construirIndice(DICIONARIO);
+const tec = (texto, a = 0, b = texto.length, cfg = SEM_GATILHO) => {
+  const r = ajustarTeclado(texto, a, b, IDX, cfg, NOMES);
+  return r ? r.texto : texto;
+};
+teste('teclado: troca código digitado', () => {
+  igual(tec('Ontem H chegou '), 'Ontem Hán Lì 韩立 chegou ');
+  igual(tec('Ontem 2L chegou '), 'Ontem Lín Yǔ chegou ');
+  igual(tec('Ele viu dois L '), 'Ele viu Lín Yǔ ');
+});
+teste('teclado: texto ditado pelo Gboard (já pontuado) mantém a pontuação dele', () => {
+  igual(tec('Ele chegou, olhou para H. Quem é você? '), 'Ele chegou, olhou para Hán Lì 韩立. Quem é você? ');
+  igual(tec('Era tarde mas ele ficou '), 'Era tarde mas ele ficou ');
+});
+teste('teclado: não troca palavras comuns sem gatilho', () => {
+  // "a" é variação de H, mas ao digitar o artigo continua artigo.
+  igual(tec('Ela viu a casa '), 'Ela viu a casa ');
+});
+teste('teclado: com gatilho ligado só troca depois da palavra-gatilho', () => {
+  igual(tec('Ontem H viu código H ', 0, undefined, COM_GATILHO), 'Ontem H viu Hán Lì 韩立 ');
+  igual(tec('Viu código a ', 0, undefined, COM_GATILHO), 'Viu Hán Lì 韩立 ');
+});
+teste('teclado: só mexe no trecho novo', () => {
+  const antigo = 'H fica assim. ';
+  igual(tec(antigo + 'Depois H ', antigo.length), antigo + 'Depois Hán Lì 韩立 ');
+});
+teste('teclado: nomes já no texto não são trocados de novo', () => {
+  const dic = [...DICIONARIO, { id: '9', codigo: 'Li', variacoes: [], texto: 'Senhor Li', categoria: 'personagem' }];
+  const idx = construirIndice(dic);
+  igual(ajustarTeclado('Viu Hán Lì 韩立 ontem ', 0, 22, idx, SEM_GATILHO, dic.map((e) => e.texto)), null);
+});
+teste('teclado: espaço duplo, espaço antes de pontuação e pontuação dupla', () => {
+  igual(tec('Ele  saiu , e voltou ,. Fim '), 'Ele saiu, e voltou. Fim ');
+  igual(tec('Ele saiu.. Fim '), 'Ele saiu. Fim ');
+  igual(tec('Talvez... ele volte '), 'Talvez... ele volte ');
+});
+teste('teclado: maiúscula depois de ponto, "?", "!" e nova linha', () => {
+  igual(tec('ele saiu. depois voltou? sim! claro\nfim '), 'Ele saiu. Depois voltou? Sim! Claro\nFim ');
+});
+teste('teclado: nome do dicionário fica exatamente como cadastrado', () => {
+  igual(tec('Ele parou. qì fluía '), 'Ele parou. qì fluía ');
+  igual(tec('Ele parou. 2M fluía '), 'Ele parou. qì fluía ');
+  igual(tec('Fim. iPhone novo '), 'Fim. iPhone novo ');
+});
+teste('teclado: respeita "maiúscula automática" desligada', () => {
+  igual(tec('ele saiu. depois ', 0, undefined, { ...SEM_GATILHO, maiusculaAuto: false }), 'ele saiu. depois ');
+});
+teste('teclado: nunca acrescenta pontuação (não duplica a do teclado)', () => {
+  const t = 'Ele chegou. Olhou em volta, e saiu ';
+  igual(tec(t), t);
 });
 
 teste('copiar: trecho selecionado ou texto inteiro', () => {

@@ -29,6 +29,31 @@ export class TelaAjustes {
     });
     $('#aj-comandos').addEventListener('change', (e) => this.ctx.mudarConfig('comandosFalados', e.target.checked));
     $('#aj-maiuscula').addEventListener('change', (e) => this.ctx.mudarConfig('maiusculaAuto', e.target.checked));
+    $('#aj-pont-auto').addEventListener('change', (e) => this.ctx.mudarConfig('pontuacaoAuto', e.target.checked));
+    $('#aj-teclado').addEventListener('change', (e) => this.ctx.mudarConfig('modoTeclado', e.target.checked));
+    // A pausa longa (ponto) é sempre maior que a curta (vírgula).
+    const curta = $('#aj-pausa-curta');
+    const longa = $('#aj-pausa-longa');
+    curta.addEventListener('input', () => {
+      const v = Number(curta.value);
+      this.ctx.mudarConfig('pausaCurta', v);
+      if (Number(longa.value) < v + 300) {
+        longa.value = Math.min(Number(longa.max), v + 300);
+        this.ctx.mudarConfig('pausaLonga', Number(longa.value));
+      }
+      this.mostrarPausas();
+    });
+    longa.addEventListener('input', () => {
+      let v = Number(longa.value);
+      if (v < Number(curta.value) + 300) { v = Number(curta.value) + 300; longa.value = v; }
+      this.ctx.mudarConfig('pausaLonga', v);
+      this.mostrarPausas();
+    });
+    $('#aj-pausa-padrao').addEventListener('click', async () => {
+      await this.ctx.mudarConfig('pausaCurta', db.CONFIG_PADRAO.pausaCurta);
+      await this.ctx.mudarConfig('pausaLonga', db.CONFIG_PADRAO.pausaLonga);
+      this.mostrar();
+    });
     $('#aj-backup').addEventListener('click', () => this.backup());
     $('#aj-restaurar').addEventListener('click', () => this.restaurar());
   }
@@ -47,6 +72,11 @@ export class TelaAjustes {
     $('#aj-gatilho').value = c.palavraGatilho;
     $('#aj-comandos').checked = c.comandosFalados !== false;
     $('#aj-maiuscula').checked = c.maiusculaAuto !== false;
+    $('#aj-pont-auto').checked = c.pontuacaoAuto !== false;
+    $('#aj-teclado').checked = c.modoTeclado !== false;
+    $('#aj-pausa-curta').value = c.pausaCurta;
+    $('#aj-pausa-longa').value = c.pausaLonga;
+    this.mostrarPausas();
     $('#aj-voz-status').textContent = Ditado.suportado()
       ? 'Reconhecimento de voz disponível neste navegador. Ele usa a internet para entender a fala.'
       : 'Este navegador não tem reconhecimento de voz. Use o Chrome (Android) ou o Safari (iPhone).';
@@ -54,6 +84,12 @@ export class TelaAjustes {
       ? `Último backup: ${formatarData(c.ultimoBackup)}.`
       : 'Você ainda não fez nenhum backup.';
     $('#aj-versao').textContent = this.ctx.versao;
+  }
+
+  mostrarPausas() {
+    const seg = (ms) => `${(Number(ms) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
+    $('#aj-pausa-curta-valor').textContent = seg($('#aj-pausa-curta').value);
+    $('#aj-pausa-longa-valor').textContent = seg($('#aj-pausa-longa').value);
   }
 
   async backup() {

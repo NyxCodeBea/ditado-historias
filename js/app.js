@@ -11,7 +11,7 @@ import { TelaHistorias } from './historias.js';
 import { TelaDicionario } from './dicionario.js';
 import { TelaAjustes, lembrarBackup } from './ajustes.js';
 
-export const VERSAO = '1.0.0';
+export const VERSAO = '1.1.0';
 
 // Estado compartilhado entre as telas.
 const ctx = {
@@ -75,6 +75,7 @@ function aplicarAparencia() {
 // ---------- Navegação ----------
 
 let telaAtual = null;
+let atualizacaoPendente = false; // versão nova pronta enquanto o editor estava aberto
 
 function mostrarTela(nome) {
   for (const s of document.querySelectorAll('.tela')) s.classList.toggle('ativa', s.id === `tela-${nome}`);
@@ -86,6 +87,8 @@ function mostrarTela(nome) {
 async function rotear() {
   const [, tela = 'historias', id] = (location.hash || '#/historias').split('/');
   if (telaAtual === 'editor' && tela !== 'editor') await ctx.telas.editor.fechar();
+  // A história já foi salva: agora é seguro trocar para a versão nova.
+  if (atualizacaoPendente && tela !== 'editor') { location.reload(); return; }
 
   if (tela === 'editor') {
     const h = id && await db.obterHistoria(decodeURIComponent(id));
@@ -151,7 +154,17 @@ async function iniciar() {
   setTimeout(() => { if (telaAtual === 'historias') lembrarBackup(ctx); }, 1500);
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // Versão nova do app: entra sozinha, sem reinstalar. Os dados (IndexedDB) não são tocados.
+    const tinhaVersao = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!tinhaVersao || atualizacaoPendente) return;
+      atualizacaoPendente = true;
+      if (telaAtual !== 'editor') location.reload();
+      else aviso('App atualizado. A versão nova entra quando você voltar para a lista.', 4000);
+    });
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+      .then((r) => r.update())
+      .catch(() => {});
   }
 }
 

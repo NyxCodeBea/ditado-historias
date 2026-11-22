@@ -95,6 +95,10 @@ export const CONFIG_PADRAO = {
   palavraGatilho: 'código',
   comandosFalados: true,
   maiusculaAuto: true,
+  pontuacaoAuto: true,      // vírgula e ponto pelas pausas — começa LIGADA
+  pausaCurta: 700,          // ms de silêncio para vírgula
+  pausaLonga: 1600,         // ms de silêncio para ponto final
+  modoTeclado: true,        // ajusta o texto digitado/ditado pelo teclado do celular
   ultimoBackup: 0,
   lembreteBackupEm: 0,
 };

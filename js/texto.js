@@ -250,6 +250,23 @@ export function analisarTrecho(texto, indice, cfg = {}) {
 
 const ABERTURAS = new Set(['“', '(', '‘', '«', '[']);
 
+const FRACOS = ',;:';
+const FORTES = '.?!…';
+const SINAIS = FRACOS + FORTES;
+
+/**
+ * Junta dois sinais vizinhos sem pontuação dupla.
+ * ",." → "."   ".." → "."   ".?" → "?"   "?," → "?"   "?!" fica.
+ */
+export function juntarPontuacao(a, b) {
+  if (a === b && ',.;:…'.includes(a)) return a;
+  if (FRACOS.includes(a) && SINAIS.includes(b)) return b;
+  if (FORTES.includes(a) && FRACOS.includes(b)) return a;
+  if (a === '.' && FORTES.includes(b)) return b;
+  if (FORTES.includes(a) && b === '.') return a;
+  return a + b;
+}
+
 function aparaEspacos(s) {
   return s.replace(/[ \t ]+$/, '');
 }
@@ -327,11 +344,10 @@ export function anexar(s, peca, cfg = {}) {
       // Nomes do dicionário entram exatamente como cadastrados.
       return s + (precisaEspaco(s) ? ' ' : '') + peca.texto;
     case 'pont': {
-      let o = aparaEspacos(s);
+      const o = aparaEspacos(s);
       const c = peca.texto;
       const ultimo = o.slice(-1);
-      if (ultimo === c && (c === '.' || c === ',')) return o;
-      if ((ultimo === ',' || ultimo === ';' || ultimo === ':') && '.?!…'.includes(c)) o = o.slice(0, -1);
+      if (ultimo && SINAIS.includes(ultimo)) return o.slice(0, -1) + juntarPontuacao(ultimo, c);
       return o + c;
     }
     case 'travessao': {
@@ -366,7 +382,7 @@ export function anexar(s, peca, cfg = {}) {
  * Insere peças entre "antes" e "depois" (posição do cursor).
  * Devolve { texto, cursor } — cursor logo após o que foi inserido.
  */
-export function montarInsercao(antes, pecas, depois, cfg = {}) {
+export function montarInsercao(antes, pecas, depois, cfg = {}, nomes = []) {
   let s = antes;
   for (const p of pecas) s = anexar(s, p, cfg);
   let d = depois || '';
@@ -378,13 +394,21 @@ export function montarInsercao(antes, pecas, depois, cfg = {}) {
       s = aparaEspacos(s);
     } else if (/[,.;:!?…”)\]]/.test(c)) {
       s = aparaEspacos(s);
+      // Sem pontuação dupla na emenda (",." vira "."), preservando reticências.
+      const u = s.slice(-1);
+      if (u && SINAIS.includes(u) && SINAIS.includes(c) && !s.endsWith('..') && !d.startsWith('..')) {
+        const j = juntarPontuacao(u, c);
+        if (j === u) d = d.slice(1);
+        else if (j === c) s = s.slice(0, -1);
+      }
     } else if (precisaEspaco(s)) {
       s += ' ';
     }
-    // Começo de frase no texto que vem depois.
+    // Começo de frase no texto que vem depois (nomes do dicionário ficam como cadastrados).
     if (cfg.maiusculaAuto !== false && pecas.length && precisaMaiuscula(s)) {
       const m = d.match(/^([ \t]*)(\p{Ll})/u);
-      if (m && pecas[pecas.length - 1].tipo !== 'palavra' && pecas[pecas.length - 1].tipo !== 'nome') {
+      const ehNome = m && nomes.some((n) => n && d.startsWith(n, m[1].length));
+      if (m && !ehNome && pecas[pecas.length - 1].tipo !== 'palavra' && pecas[pecas.length - 1].tipo !== 'nome') {
         d = m[1] + m[2].toLocaleUpperCase('pt-BR') + d.slice(m[0].length);
       }
     }
@@ -396,6 +420,218 @@ export function montarInsercao(antes, pecas, depois, cfg = {}) {
 export function previaParcial(antes, parcial) {
   if (!parcial) return '';
   return (precisaEspaco(antes) ? ' ' : '') + parcial.trim();
+}
+
+// ---------- Pontuação automática (pausas, perguntas, conjunções) ----------
+
+export const PAUSA_CURTA_PADRAO = 700;   // ms — vírgula
+export const PAUSA_LONGA_PADRAO = 1600;  // ms — ponto final
+
+// Começos de pergunta (normalizados). Os mais longos vêm primeiro.
+const INICIOS_PERGUNTA = [
+  ['sera', 'que'], ['por', 'que'], ['o', 'que'], ['porque'], ['quem'],
+  ['como'], ['onde'], ['aonde'], ['quando'], ['qual'], ['quais'], ['quanto'],
+  ['quanta'], ['quantos'], ['quantas'], ['cade'],
+];
+
+// Recebem vírgula antes quando não há pontuação.
+const CONJUNCOES = new Set(['mas', 'porem', 'contudo', 'entao', 'entretanto', 'todavia']);
+// Depois destas palavras a conjunção não leva vírgula ("e então", "desde então").
+const SEM_VIRGULA_DEPOIS = new Set(['e', 'ou', 'nem', 'que', 'se', 'mas', 'pois', 'porque', 'ate', 'so', 'desde', 'ja', 'entao']);
+
+/** A frase que está sendo escrita no fim de "s" começa como pergunta? */
+export function frasePergunta(s) {
+  const t = String(s || '');
+  let i = t.length - 1;
+  while (i >= 0 && !'.?!…\n'.includes(t[i])) i--;
+  const palavras = tokenizar(t.slice(i + 1)).filter((x) => x.ehPalavra).map((x) => x.n);
+  return INICIOS_PERGUNTA.some((seq) => seq.every((p, j) => palavras[j] === p));
+}
+
+function ultimaPalavra(s) {
+  const m = String(s || '').match(/([\p{L}\p{M}\p{N}]+)[ \t]*$/u);
+  return m ? normalizar(m[1]) : null;
+}
+
+/**
+ * Acrescenta pontuação automática às peças de um trecho ditado.
+ *  antes: texto antes do ponto de inserção
+ *  opc.pausa: silêncio (ms) desde o trecho anterior, ou null se não for continuação
+ *  opc.curta / opc.longa: limites de pausa (ms)
+ * Comandos falados têm prioridade: se o trecho começa com pontuação, nada é acrescentado.
+ */
+export function pontuarAuto(antes, pecas, opc = {}) {
+  if (!pecas || !pecas.length) return pecas;
+  const curta = Number(opc.curta) || PAUSA_CURTA_PADRAO;
+  const longa = Math.max(Number(opc.longa) || PAUSA_LONGA_PADRAO, curta);
+  const fim = aparaEspacos(String(antes || ''));
+  const terminaEmPalavra = /[\p{L}\p{M}\p{N}”’)]$/u.test(fim);
+  const saida = [];
+
+  // 1. Pausa entre trechos.
+  if (opc.pausa != null && opc.pausa >= curta && terminaEmPalavra) {
+    const p0 = pecas[0];
+    const longaPausa = opc.pausa >= longa;
+    let pode = false;
+    if (p0.tipo === 'palavra' || p0.tipo === 'nome' || p0.tipo === 'abreAspas' || p0.tipo === 'abrePar') pode = true;
+    else if (p0.tipo === 'aspas') pode = !aspasAbertas(fim);
+    else if (p0.tipo === 'linha' || p0.tipo === 'paragrafo') pode = longaPausa;
+    if (pode) {
+      const sinal = longaPausa ? (frasePergunta(fim) ? '?' : '.') : ',';
+      saida.push({ tipo: 'pont', texto: sinal, auto: true });
+    }
+  }
+
+  // 2. Vírgula antes de conjunções.
+  let anterior = saida.length ? 'pont' : (terminaEmPalavra && /[\p{L}\p{M}\p{N}]$/u.test(fim) ? 'palavra' : 'outro');
+  let palavraAnterior = anterior === 'palavra' ? ultimaPalavra(fim) : null;
+  for (const p of pecas) {
+    if (p.tipo === 'palavra') {
+      const n = normalizar(p.texto);
+      if (CONJUNCOES.has(n) && (anterior === 'palavra' || anterior === 'nome') && !SEM_VIRGULA_DEPOIS.has(palavraAnterior)) {
+        saida.push({ tipo: 'pont', texto: ',', auto: true });
+      }
+      palavraAnterior = n;
+    } else {
+      palavraAnterior = null;
+    }
+    anterior = p.tipo === 'palavra' || p.tipo === 'nome' ? p.tipo : 'outro';
+    saida.push(p);
+  }
+  return saida;
+}
+
+// ---------- Modo teclado (texto digitado ou ditado pelo teclado do celular) ----------
+
+function tokenizarComPosicao(texto, base = 0) {
+  const re = /[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*|\.{3}|\S/gu;
+  const lista = [];
+  for (const m of String(texto || '').matchAll(re)) {
+    const bruto = m[0];
+    const ehPalavra = /[\p{L}\p{N}]/u.test(bruto);
+    lista.push({ bruto, ehPalavra, n: ehPalavra ? normalizar(bruto) : '', ini: base + m.index, fim: base + m.index + bruto.length });
+  }
+  return lista;
+}
+
+function reduzirSinais(seq) {
+  if (/^\.{3,}$/.test(seq)) return seq; // reticências
+  let r = seq[0];
+  for (const c of seq.slice(1)) r = r.slice(0, -1) + juntarPontuacao(r.slice(-1), c);
+  return r;
+}
+
+/**
+ * Ajusta um trecho que entrou pelo teclado, entre as posições "a" e "b":
+ * troca códigos do dicionário (sem trocar palavras comuns por engano),
+ * tira espaço duplo, espaço antes de pontuação e pontuação dupla, e põe
+ * maiúscula depois de ponto, "?", "!" e nova linha. Nunca acrescenta
+ * pontuação (o teclado já pontua). Nomes do dicionário não são alterados.
+ * Devolve { texto, delta, ids } ou null se nada mudou.
+ */
+export function ajustarTeclado(texto, a, b, indice, cfg = {}, nomes = []) {
+  const original = String(texto || '');
+  b = Math.min(b, original.length);
+  a = Math.max(0, Math.min(a, b));
+  // Começa no início da palavra.
+  while (a > 0 && /[\p{L}\p{M}\p{N}]/u.test(original[a - 1])) a--;
+  if (b <= a) return null;
+  let t = original;
+  let fimReg = b;
+  const ids = [];
+  const listaNomes = (nomes || []).filter(Boolean);
+
+  // 1. Códigos do dicionário.
+  if (indice && indice.mapa && indice.mapa.size) {
+    let ext = Math.max(0, a - 80);
+    while (ext > 0 && !/\s/.test(t[ext - 1])) ext--;
+    const tokens = tokenizarComPosicao(t.slice(ext, fimReg), ext);
+    const protegidos = [];
+    for (const n of listaNomes) {
+      let p = t.indexOf(n, ext);
+      while (p !== -1 && p < fimReg) { protegidos.push([p, p + n.length]); p = t.indexOf(n, p + 1); }
+    }
+    const protegido = (tk) => protegidos.some(([x, y]) => tk.ini < y && tk.fim > x);
+    const gatilho = tokenizar(cfg.palavraGatilho || '').filter((x) => x.ehPalavra).map((x) => x.n);
+    const usarGatilho = !!cfg.gatilhoAtivo && gatilho.length > 0;
+    const trocas = [];
+    let i = 0;
+    while (i < tokens.length) {
+      let g = 0;
+      if (usarGatilho) {
+        g = casarSequencia(tokens, i, gatilho);
+        if (!g) { i++; continue; }
+      }
+      let achou = null;
+      let chave = '';
+      const cands = [];
+      for (let k = 0; k < MAX_TOKENS_CODIGO && i + g + k < tokens.length; k++) {
+        const tk = tokens[i + g + k];
+        if (!tk.ehPalavra || protegido(tk)) break;
+        chave += tk.n;
+        cands.push(chave);
+      }
+      for (let k = cands.length; k >= 1; k--) {
+        const c = cands[k - 1];
+        // Sem palavra-gatilho, uma palavra comum ("a", "ele") nunca é trocada ao digitar.
+        if (!usarGatilho && PALAVRAS_COMUNS.has(c)) continue;
+        const r = indice.mapa.get(c);
+        if (r) { achou = { entrada: r.entrada, k }; break; }
+      }
+      if (achou) {
+        const ini = tokens[i].ini;
+        const fim = tokens[i + g + achou.k - 1].fim;
+        if (fim > a && t.slice(ini, fim) !== achou.entrada.texto) {
+          trocas.push({ ini, fim, texto: achou.entrada.texto });
+          ids.push(achou.entrada.id);
+        }
+        i += g + achou.k;
+      } else {
+        i++;
+      }
+    }
+    for (const tr of trocas.reverse()) {
+      t = t.slice(0, tr.ini) + tr.texto + t.slice(tr.fim);
+      fimReg += tr.texto.length - (tr.fim - tr.ini);
+    }
+  }
+
+  // 2. Espaços e pontuação.
+  let ini = a;
+  while (ini > 0 && /[ \t,.;:?!…]/.test(t[ini - 1])) ini--;
+  const esquerda = t.slice(0, ini);
+  let seg = t.slice(ini, fimReg);
+  seg = seg.replace(/[ \t]{2,}/g, ' ');
+  if (/[\p{L}\p{M}\p{N}”)]$/u.test(esquerda) || esquerda === '') seg = seg.replace(/^[ \t]+(?=[,.;:!?…)\]”])/, '');
+  seg = seg.replace(/[ \t]+(?=[,.;:!?…)\]”])/g, '');
+  seg = seg.replace(/[,.;:?!…]{2,}/g, reduzirSinais);
+
+  // 3. Maiúsculas no começo de frase.
+  if (cfg.maiusculaAuto !== false) {
+    let r = '';
+    for (let k = 0; k < seg.length; k++) {
+      const c = seg[k];
+      const prev = k > 0 ? seg[k - 1] : esquerda.slice(-1);
+      if (/\p{Ll}/u.test(c) && !/[\p{L}\p{M}\p{N}'’-]/u.test(prev || '')) {
+        const prefixo = esquerda + r;
+        const palavra = seg.slice(k).match(/^[\p{L}\p{M}]+/u)[0];
+        const misto = /\p{Lu}/u.test(palavra.slice(1)); // "iPhone"
+        const reticencias = /(\.\.|…)[ \t"“(]*$/.test(prefixo);
+        const pos = prefixo.length;
+        const ehNome = listaNomes.some((n) => (esquerda + r + seg.slice(k)).startsWith(n, pos));
+        if (!misto && !reticencias && !ehNome && precisaMaiuscula(prefixo)) {
+          r += c.toLocaleUpperCase('pt-BR');
+          continue;
+        }
+      }
+      r += c;
+    }
+    seg = r;
+  }
+
+  const novo = esquerda + seg + t.slice(fimReg);
+  if (novo === original) return null;
+  return { texto: novo, delta: novo.length - original.length, ids };
 }
 
 // ---------- Utilidades ----------
